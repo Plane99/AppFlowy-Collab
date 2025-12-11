@@ -3,7 +3,7 @@ use crate::importer::imported_collab::{ImportType, ImportedCollab, ImportedColla
 
 use crate::database::database::{Database, get_row_document_id};
 use crate::database::template::csv::{CSVResource, CSVTemplate};
-use crate::document::blocks::{BlockType, TextDelta, mention_block_data, mention_block_delta};
+use crate::document::blocks::{Block, BlockType, TextDelta, mention_block_data, mention_block_delta};
 use crate::document::document::Document;
 use crate::document::importer::define::URL_FIELD;
 use crate::document::importer::md_importer::{MDImporter, create_image_block};
@@ -408,12 +408,48 @@ impl NotionPage {
     if let Some(last_link) = links.last() {
       if let Some(view) = external_link_views.get(&last_link.id) {
         if matches!(block_type, BlockType::Paragraph) {
-          let data = mention_block_data(&view.view_id, &self.view_id);
-          if let Err(err) = document.update_block(block_id, data) {
-            error!(
-              "Failed to update block when trying to replace ref link. error: {:?}",
-              err
-            );
+          // Check if the linked view is a database (CSV file)
+          if matches!(view.notion_file, NotionFile::CSV { .. }) {
+            // Create and insert a Grid block for the database
+            let database_block_id = crate::document::document_data::generate_id();
+            let mut grid_data = HashMap::new();
+            grid_data.insert("view_id".to_string(), json!(view.view_id));
+
+            let grid_block = Block {
+              id: database_block_id.clone(),
+              ty: BlockType::Grid.to_string(),
+              data: grid_data,
+              parent: self.view_id.clone(),
+              children: "".to_string(),
+              external_id: None,
+              external_type: None,
+            };
+
+            // Insert the grid block after the current paragraph
+            if let Err(err) = document.insert_block(grid_block, Some(block_id.to_string())) {
+              error!(
+                "Failed to insert database block when replacing CSV link. error: {:?}",
+                err
+              );
+            }
+
+            // Clear the paragraph content since the database is now a separate block
+            let empty_data = HashMap::new();
+            if let Err(err) = document.update_block(block_id, empty_data) {
+              error!(
+                "Failed to clear paragraph block after inserting database block. error: {:?}",
+                err
+              );
+            }
+          } else {
+            // For non-database views (documents), create a mention block as before
+            let data = mention_block_data(&view.view_id, &self.view_id);
+            if let Err(err) = document.update_block(block_id, data) {
+              error!(
+                "Failed to update block when trying to replace ref link. error: {:?}",
+                err
+              );
+            }
           }
         }
       }

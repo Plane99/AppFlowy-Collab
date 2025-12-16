@@ -346,10 +346,14 @@ impl NotionPage {
             if let Ok(links) = extract_external_links(&delta_str) {
               for link in &links {
                 if let Some(view) = external_link_views.get(&link.id) {
-                  if v == link.name {
-                    is_changed = true;
-                    *delta = mention_block_delta(&view.view_id);
-                  }
+                  // Notion markdown export may encode internal links with display text that doesn't
+                  // exactly match the filename-derived `link.name` (whitespace, emojis, etc.).
+                  // If we can resolve the link target ID to an imported view, always convert to
+                  // a mention delta so the link becomes navigable in AppFlowy.
+                  let _ = &v;
+                  is_changed = true;
+                  *delta = mention_block_delta(&view.view_id);
+                  break;
                 }
               }
 

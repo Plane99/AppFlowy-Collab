@@ -28,7 +28,18 @@ pub(crate) fn collect_entry_resources(
   walk_path: &Path,
   relative_path: Option<&Path>,
 ) -> Vec<Resource> {
-  let image_extensions = ["jpg", "jpeg", "png"];
+  let image_extensions = [
+    "jpg",
+    "jpeg",
+    "png",
+    "gif",
+    "webp",
+    "svg",
+    "bmp",
+    "tiff",
+    "heic",
+    "heif",
+  ];
   let file_extensions = ["zip"];
 
   let mut image_paths = Vec::new();
@@ -502,11 +513,61 @@ pub(crate) fn collect_links_from_node(node: &Node, links: &mut Vec<String>) {
         collect_links_from_node(child, links);
       }
     },
+    Node::Heading(heading) => {
+      for child in &heading.children {
+        collect_links_from_node(child, links);
+      }
+    },
+    Node::List(list) => {
+      for child in &list.children {
+        collect_links_from_node(child, links);
+      }
+    },
+    Node::ListItem(list_item) => {
+      for child in &list_item.children {
+        collect_links_from_node(child, links);
+      }
+    },
+    Node::Blockquote(blockquote) => {
+      for child in &blockquote.children {
+        collect_links_from_node(child, links);
+      }
+    },
+    Node::Table(table) => {
+      for child in &table.children {
+        collect_links_from_node(child, links);
+      }
+    },
+    Node::TableRow(table_row) => {
+      for child in &table_row.children {
+        collect_links_from_node(child, links);
+      }
+    },
+    Node::TableCell(table_cell) => {
+      for child in &table_cell.children {
+        collect_links_from_node(child, links);
+      }
+    },
+    Node::Strong(strong) => {
+      for child in &strong.children {
+        collect_links_from_node(child, links);
+      }
+    },
+    Node::Emphasis(emphasis) => {
+      for child in &emphasis.children {
+        collect_links_from_node(child, links);
+      }
+    },
+    Node::Delete(delete) => {
+      for child in &delete.children {
+        collect_links_from_node(child, links);
+      }
+    },
     _ => {},
   }
 }
 fn link_type_from_extension(extension: Option<&str>) -> ExternalLinkType {
-  match extension {
+  match extension.map(|s| s.to_ascii_lowercase()).as_deref() {
     Some("md") => ExternalLinkType::Markdown,
     Some("csv") => ExternalLinkType::CSV,
     _ => ExternalLinkType::Unknown,
@@ -515,16 +576,31 @@ fn link_type_from_extension(extension: Option<&str>) -> ExternalLinkType {
 
 pub(crate) fn extract_external_links(path_str: &str) -> Result<Vec<ExternalLink>, CollabError> {
   let path_str = percent_decode_str(path_str).decode_utf8()?.to_string();
+  let cleaned_path_str = path_str
+    .split('#')
+    .next()
+    .unwrap_or(&path_str)
+    .split('?')
+    .next()
+    .unwrap_or(&path_str)
+    .to_string();
   let mut result = Vec::new();
-  let re = Regex::new(r"^(.*?)\s*([a-f0-9]{32})(?:\.(\w+))?$").unwrap();
-  let path = Path::new(&path_str);
+  let re = Regex::new(r"^(.*?)\s*([a-fA-F0-9]{32})(?:\.(\w+))?$").unwrap();
+  let path = Path::new(&cleaned_path_str);
 
   for component in path.components() {
     if let Component::Normal(component_str) = component {
       if let Some(component_str) = component_str.to_str() {
         if let Ok(Some(captures)) = re.captures(component_str) {
-          let name = captures.get(1).map_or("", |m| m.as_str()).to_string();
-          let id = captures.get(2).map_or("", |m| m.as_str()).to_string();
+          let name = captures
+            .get(1)
+            .map_or("", |m| m.as_str())
+            .trim()
+            .to_string();
+          let id = captures
+            .get(2)
+            .map_or("", |m| m.as_str())
+            .to_ascii_lowercase();
           let link_type = captures
             .get(3)
             .map(|m| link_type_from_extension(Some(m.as_str())))
@@ -606,9 +682,10 @@ impl FileExtension {
 fn get_file_extension(path: &Path, include_partial_csv: bool) -> FileExtension {
   path
     .extension()
-    .map_or(FileExtension::Unknown, |ext| match ext.to_str() {
-      Some("md") => FileExtension::Markdown,
-      Some("csv") => FileExtension::Csv {
+    .and_then(|ext| ext.to_str().map(|s| s.to_ascii_lowercase()))
+    .map_or(FileExtension::Unknown, |ext| match ext.as_str() {
+      "md" => FileExtension::Markdown,
+      "csv" => FileExtension::Csv {
         include_partial_csv,
       },
       _ => FileExtension::Unknown,
@@ -616,7 +693,7 @@ fn get_file_extension(path: &Path, include_partial_csv: bool) -> FileExtension {
 }
 fn name_and_id_from_path(path: &Path) -> Result<(String, Option<String>), CollabError> {
   let re =
-    Regex::new(r"^(.*?)(?:\s+([a-f0-9]{32}))?(?:_[a-zA-Z0-9]+)?(?:\.[a-zA-Z0-9]+)?\s*$").unwrap();
+    Regex::new(r"^(.*?)(?:\s+([a-fA-F0-9]{32}))?(?:_[a-zA-Z0-9]+)?(?:\.[a-zA-Z0-9]+)?\s*$").unwrap();
 
   let input = path
     .file_name()
@@ -630,7 +707,7 @@ fn name_and_id_from_path(path: &Path) -> Result<(String, Option<String>), Collab
       .filter(|s| !s.is_empty())
       .ok_or(CollabError::ImporterInvalidPathFormat)?;
 
-    let file_id = captures.get(2).map(|m| m.as_str().to_string());
+    let file_id = captures.get(2).map(|m| m.as_str().to_ascii_lowercase());
     return Ok((file_name, file_id));
   }
 
@@ -642,10 +719,10 @@ fn name_and_id_from_path(path: &Path) -> Result<(String, Option<String>), Collab
 /// - Otherwise, if it's a `.csv`, it's considered a `CSVPart`.
 /// - `.md` files are classified as `Markdown`.
 fn notion_file_from_path(path: &Path, no_subpages: bool) -> Option<NotionFile> {
-  let extension = path.extension()?.to_str()?;
+  let extension = path.extension()?.to_str()?.to_ascii_lowercase();
   let file_size = get_file_size(&path.to_path_buf()).ok()?;
 
-  match extension {
+  match extension.as_str() {
     "md" => {
       let mut resources = vec![];
       if no_subpages {
